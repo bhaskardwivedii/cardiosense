@@ -38,13 +38,13 @@ def _model_or_400(svc: ModelService, key: str | None):
     try:
         return svc.resolve(key)
     except KeyError:
-        raise HTTPException(400, f"Unknown model '{key}'. Available: {', '.join(svc.models)}")
+        raise HTTPException(400, f"Unknown model '{key}'. Available: {', '.join(svc.meta)}")
 
 
 def _to_out(p: Prediction, svc: ModelService) -> PredictionOut:
     x = [p.inputs[f] if f != "gender" else (1.0 if p.inputs["gender"] == "male" else 0.0) for f in RAW_FEATURES]
     x = [float(v) for v in x]
-    name = svc.models[p.model_key].meta["name"] if p.model_key in svc.models else p.model_key
+    name = svc.meta[p.model_key]["name"] if p.model_key in svc.meta else p.model_key
     return PredictionOut(id=p.id, patient_ref=p.patient_ref, model_key=p.model_key, model_name=name,
                          probability=p.probability, risk_band=p.risk_band, inputs=p.inputs,
                          derived=derived_values(x), explanation=p.explanation, warnings=p.warnings or [],
@@ -61,7 +61,7 @@ def _owned_prediction(db: Session, user: User, pred_id: int) -> Prediction:
 # ---------------------------------------------------------------- health & models
 @router.get("/health", tags=["system"])
 def health(svc: ModelService = Depends(get_service)):
-    return {"status": "ok", "models_loaded": list(svc.models), "default_model": svc.default_key}
+    return {"status": "ok", "models_available": list(svc.meta), "default_model": svc.default_key}
 
 
 @router.get("/models", tags=["models"])
@@ -135,11 +135,11 @@ def compare(body: PatientInput, user: User = Depends(get_current_user), svc: Mod
     """Score one patient with every model (nothing is saved)."""
     x = body.to_vector()
     out = []
-    for k, m in svc.models.items():
+    for k, m in svc.meta.items():
         prob = float(svc.predict_proba(k, [x])[0])
-        out.append({"model_key": k, "model_name": m.meta["name"], "probability": prob,
-                    "risk_band": risk_band(prob), "test_accuracy": m.meta["metrics"]["accuracy"],
-                    "test_auc": m.meta["metrics"]["auc"], "default": k == svc.default_key})
+        out.append({"model_key": k, "model_name": m["name"], "probability": prob,
+                    "risk_band": risk_band(prob), "test_accuracy": m["metrics"]["accuracy"],
+                    "test_auc": m["metrics"]["auc"], "default": k == svc.default_key})
     return out
 
 
@@ -300,7 +300,7 @@ def list_predictions(limit: int = Query(25, ge=1, le=200), offset: int = Query(0
 def get_prediction(pred_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user),
                    svc: ModelService = Depends(get_service)):
     p = _owned_prediction(db, user, pred_id)
-    if p.explanation is None and p.model_key in svc.models:  # batch rows: explain on demand
+    if p.explanation is None and p.model_key in svc.meta:  # batch rows: explain on demand
         x = [float(1.0 if p.inputs["gender"] == "male" else 0.0) if f == "gender" else float(p.inputs[f])
              for f in RAW_FEATURES]
         p.explanation = svc.explain(p.model_key, x)
