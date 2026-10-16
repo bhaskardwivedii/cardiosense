@@ -195,4 +195,4 @@ The models were trained on one public dataset of routine examination data, and t
 
 ## Citation
 
-If you use this project, please cite the accompanying paper (authors: Bhaskar Dwivedi, Parveen Kumar, Krishna, Aman Mishra; guide: Pavi Saraswat; Department of Information Technology, KIET Group of Institutions, Ghaziabad).
+If you use this project, please credit the project owner, **Bhaskar Dwivedi**.
