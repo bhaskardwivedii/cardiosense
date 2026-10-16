@@ -178,4 +178,24 @@ class ModelService:
         v = proba.reshape(len(bits), len(bg)).mean(axis=1)  # v[S], averaged over background
 
         phi = np.zeros(n)
-        subset_idx =
+        subset_idx = np.arange(len(bits))
+        for i in range(n):
+            without = subset_idx[bits[:, i] == 0]
+            with_i = without | (1 << i)
+            phi[i] = np.sum(self._coalition_weight[self._popcount[without]] * (v[with_i] - v[without]))
+
+        contribs = [{"feature": f, "label": FEATURE_LABELS[f], "value": float(val),
+                     "display_value": display_value(f, val), "shap": float(s)}
+                    for f, val, s in zip(RAW_FEATURES, x_arr, phi)]
+        contribs.sort(key=lambda c: -abs(c["shap"]))
+        return {"base_value": float(v[0]), "contributions": contribs,
+                "method": "Exact Shapley values (11 clinical inputs, probability scale)"}
+
+    def public_models(self) -> list[dict]:
+        """Metadata for every available model, without loading any pipeline into memory."""
+        out = []
+        for key, meta in self.meta.items():
+            m = {k: v for k, v in meta.items()}
+            m["default"] = key == self.default_key
+            out.append(m)
+        return out
