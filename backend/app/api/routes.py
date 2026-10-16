@@ -132,16 +132,17 @@ def predict(body: PredictRequest, db: Session = Depends(get_db), user: User = De
 
 @router.post("/predict/compare", tags=["predictions"])
 def compare(body: PatientInput, user: User = Depends(get_current_user), svc: ModelService = Depends(get_service)):
-    """Score one patient with every model (nothing is saved)."""
+    """Score one patient with every model (nothing is saved). Any model not already
+    cached from earlier requests is loaded transiently here and dropped right after,
+    so this endpoint alone can't pin all 7 models' memory in place at once."""
     x = body.to_vector()
     out = []
     for k, m in svc.meta.items():
-        prob = float(svc.predict_proba(k, [x])[0])
+        prob = float(svc.predict_proba(k, [x], cache=False)[0])
         out.append({"model_key": k, "model_name": m["name"], "probability": prob,
                     "risk_band": risk_band(prob), "test_accuracy": m["metrics"]["accuracy"],
                     "test_auc": m["metrics"]["auc"], "default": k == svc.default_key})
     return out
-
 
 # ---------------------------------------------------------------- batch
 COLUMN_ALIASES = {"sex": "gender", "systolic": "ap_hi", "sbp": "ap_hi", "diastolic": "ap_lo", "dbp": "ap_lo",
