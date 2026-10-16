@@ -101,8 +101,22 @@ class ModelService:
         bg = np.load(self.models_dir / "background.npy")
         self.background = bg[:shap_background]
         self.ranges = self.manifest["feature_ranges"]
-        self._explainers: dict[str, object] = {}
         self._lock = threading.Lock()
+
+        # Precompute the exact-Shapley machinery once: every feature subset, its size,
+        # and its Shapley weight. Independent of which model is explained, so it is
+        # shared across all 7 models and built only once at startup.
+        n = len(RAW_FEATURES)
+        subsets = np.arange(1 << n)
+        self._n = n
+        self._bits = ((subsets[:, None] >> np.arange(n)[None, :]) & 1).astype(float)
+        self._popcount = self._bits.sum(axis=1).astype(int)
+        fact = np.ones(n + 1)
+        for i in range(1, n + 1):
+            fact[i] = fact[i - 1] * i
+        sizes = np.arange(n)
+        self._coalition_weight = fact[sizes] * fact[n - sizes - 1] / fact[n]
+
         log.info("Loaded models: %s", ", ".join(self.models))
 
     @property
@@ -131,26 +145,35 @@ class ModelService:
         return out
 
     def explain(self, key: str | None, x: list[float]) -> dict:
-        """Kernel SHAP over the 11 clinical inputs, in probability units."""
-        import shap  # imported lazily: heavy import
-
+        """Exact interventional Shapley values over the 11 clinical inputs, in probability
+        units, via full coalition enumeration against the background set (2**11 = 2048
+        subsets). This is the same math a Kernel SHAP run with a full-enumeration sample
+        budget converges to, computed directly in NumPy so the service has no dependency
+        on the `shap` package (whose numba/llvmlite JIT import is memory-heavy enough to
+        crash a small instance)."""
         model = self.resolve(key)
-        with self._lock:
-            explainer = self._explainers.get(model.key)
-            if explainer is None:
-                f = lambda X: model.pipeline.predict_proba(np.asarray(X, dtype=float))[:, 1]
-                explainer = shap.KernelExplainer(f, self.background)
-                self._explainers[model.key] = explainer
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            values = explainer.shap_values(np.asarray([x], dtype=float), nsamples=2 ** len(x) + 50, silent=True)
-        values = np.asarray(values).reshape(-1)
-        contribs = [{"feature": f, "label": FEATURE_LABELS[f], "value": float(v),
-                     "display_value": display_value(f, v), "shap": float(s)}
-                    for f, v, s in zip(RAW_FEATURES, x, values)]
+        x_arr = np.asarray(x, dtype=float)
+        n, bg = self._n, self.background
+        bits = self._bits  # shape (2**n, n)
+
+        # masked[S, b, :] = x where bit i of subset S is set, else background row b.
+        masked = bits[:, None, :] * x_arr[None, None, :] + (1 - bits[:, None, :]) * bg[None, :, :]
+        proba = model.pipeline.predict_proba(masked.reshape(-1, n))[:, 1]
+        v = proba.reshape(len(bits), len(bg)).mean(axis=1)  # v[S], averaged over background
+
+        phi = np.zeros(n)
+        subset_idx = np.arange(len(bits))
+        for i in range(n):
+            without = subset_idx[bits[:, i] == 0]
+            with_i = without | (1 << i)
+            phi[i] = np.sum(self._coalition_weight[self._popcount[without]] * (v[with_i] - v[without]))
+
+        contribs = [{"feature": f, "label": FEATURE_LABELS[f], "value": float(val),
+                     "display_value": display_value(f, val), "shap": float(s)}
+                    for f, val, s in zip(RAW_FEATURES, x_arr, phi)]
         contribs.sort(key=lambda c: -abs(c["shap"]))
-        return {"base_value": float(np.asarray(explainer.expected_value).reshape(-1)[0]),
-                "contributions": contribs, "method": "Kernel SHAP (11 clinical inputs, probability scale)"}
+        return {"base_value": float(v[0]), "contributions": contribs,
+                "method": "Exact Shapley values (11 clinical inputs, probability scale)"}
 
     def public_models(self) -> list[dict]:
         out = []
