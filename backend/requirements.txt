@@ -13,5 +13,4 @@ numpy==2.5.3
 scipy==1.18.1
 pandas==3.0.5
 joblib==1.6.0
-shap==0.54.1
 reportlab==5.0.1
