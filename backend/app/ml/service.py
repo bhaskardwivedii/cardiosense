@@ -89,15 +89,24 @@ class ModelService:
     def __init__(self, models_dir: Path, shap_background: int = 40):
         self.models_dir = Path(models_dir)
         self.manifest = json.loads((self.models_dir / "manifest.json").read_text())
-        self.models: dict[str, LoadedModel] = {}
+
+        # Model pipelines are loaded lazily, on first use, and cached here. Some of
+        # these artifacts (the Random Forest in particular: 300 unlimited-depth trees)
+        # cost 100-300 MB of RAM once deserialized, far more than their file size
+        # suggests. Loading all 7 eagerly at startup was enough on its own to exceed
+        # a small instance's memory limit before a single request was even served.
+        self.meta: dict[str, dict] = {}
+        self._paths: dict[str, Path] = {}
         for meta in self.manifest["models"]:
             path = self.models_dir / f"{meta['key']}.joblib"
             if path.exists():
-                self.models[meta["key"]] = LoadedModel(meta["key"], meta, joblib.load(path))
+                self.meta[meta["key"]] = meta
+                self._paths[meta["key"]] = path
             else:
                 log.warning("Model artifact missing: %s", path)
-        if not self.models:
+        if not self._paths:
             raise RuntimeError(f"No model artifacts found in {self.models_dir}; run `python -m app.ml.train`")
+        self._pipelines: dict[str, object] = {}
         bg = np.load(self.models_dir / "background.npy")
         self.background = bg[:shap_background]
         self.ranges = self.manifest["feature_ranges"]
@@ -117,17 +126,25 @@ class ModelService:
         sizes = np.arange(n)
         self._coalition_weight = fact[sizes] * fact[n - sizes - 1] / fact[n]
 
-        log.info("Loaded models: %s", ", ".join(self.models))
+        log.info("Model artifacts available: %s (loaded lazily on first use)", ", ".join(self._paths))
 
     @property
     def default_key(self) -> str:
-        return DEFAULT_MODEL if DEFAULT_MODEL in self.models else next(iter(self.models))
+        return DEFAULT_MODEL if DEFAULT_MODEL in self._paths else next(iter(self._paths))
 
     def resolve(self, key: str | None) -> LoadedModel:
         key = key or self.default_key
-        if key not in self.models:
+        if key not in self._paths:
             raise KeyError(key)
-        return self.models[key]
+        pipeline = self._pipelines.get(key)
+        if pipeline is None:
+            with self._lock:
+                pipeline = self._pipelines.get(key)  # re-check: another thread may have loaded it
+                if pipeline is None:
+                    pipeline = joblib.load(self._paths[key])
+                    self._pipelines[key] = pipeline
+                    log.info("Loaded model on demand: %s", key)
+        return LoadedModel(key, self.meta[key], pipeline)
 
     def predict_proba(self, key: str | None, X: np.ndarray) -> np.ndarray:
         model = self.resolve(key)
@@ -176,9 +193,10 @@ class ModelService:
                 "method": "Exact Shapley values (11 clinical inputs, probability scale)"}
 
     def public_models(self) -> list[dict]:
+        """Metadata for every available model, without loading any pipeline into memory."""
         out = []
-        for key, m in self.models.items():
-            meta = {k: v for k, v in m.meta.items()}
-            meta["default"] = key == self.default_key
-            out.append(meta)
+        for key, meta in self.meta.items():
+            m = {k: v for k, v in meta.items()}
+            m["default"] = key == self.default_key
+            out.append(m)
         return out
