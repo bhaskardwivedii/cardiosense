@@ -7,6 +7,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+import gc
 import joblib
 import numpy as np
 
@@ -131,12 +132,19 @@ class ModelService:
     def default_key(self) -> str:
         return DEFAULT_MODEL if DEFAULT_MODEL in self._paths else next(iter(self._paths))
 
-    def resolve(self, key: str | None) -> LoadedModel:
+    def resolve(self, key: str | None, cache: bool = True) -> LoadedModel:
         key = key or self.default_key
         if key not in self._paths:
             raise KeyError(key)
         pipeline = self._pipelines.get(key)
         if pipeline is None:
+            if not cache:
+                # Transient load: used by endpoints that touch every model in one
+                # request (e.g. "compare all models"). Caching all 7 permanently the
+                # first time someone compares would leave every heavy model -- the
+                # Random Forest especially -- resident forever afterward, which is
+                # enough on its own to exceed a small instance's memory limit.
+                return LoadedModel(key, self.meta[key], joblib.load(self._paths[key]))
             with self._lock:
                 pipeline = self._pipelines.get(key)  # re-check: another thread may have loaded it
                 if pipeline is None:
@@ -145,9 +153,13 @@ class ModelService:
                     log.info("Loaded model on demand: %s", key)
         return LoadedModel(key, self.meta[key], pipeline)
 
-    def predict_proba(self, key: str | None, X: np.ndarray) -> np.ndarray:
-        model = self.resolve(key)
-        return model.pipeline.predict_proba(np.asarray(X, dtype=float))[:, 1]
+    def predict_proba(self, key: str | None, X: np.ndarray, cache: bool = True) -> np.ndarray:
+        model = self.resolve(key, cache=cache)
+        result = model.pipeline.predict_proba(np.asarray(X, dtype=float))[:, 1]
+        if not cache:
+            del model
+            gc.collect()
+        return result
 
     def warnings_for(self, x: list[float]) -> list[str]:
         out = []
