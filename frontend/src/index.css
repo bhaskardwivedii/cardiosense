@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; }
+  body { @apply bg-paper text-ink font-sans; font-feature-settings: "tnum" 1; }
+  :focus-visible { outline: 2px solid #0E5A73; outline-offset: 2px; }
+  h1, h2, h3 { letter-spacing: -0.01em; }
+}
+
+@layer components {
+  .panel { @apply bg-white rounded-xl shadow-panel; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-primary { @apply btn bg-brand text-white hover:bg-brand-dark; }
+  .btn-quiet { @apply btn bg-white text-ink ring-1 ring-line hover:bg-paper; }
+  .btn-danger { @apply btn bg-white text-risk-vhigh ring-1 ring-line hover:bg-red-50; }
+  .input { @apply w-full rounded-lg border border-line bg-white px-3 py-2.5 text-[15px] text-ink placeholder:text-slate-light focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20; }
+  .label { @apply block text-sm font-medium text-ink mb-1.5; }
+  .hint { @apply text-xs text-slate mt-1; }
+  .th { @apply px-4 py-2.5 text-left text-xs font-semibold text-slate; }
+  .td { @apply px-4 py-3 text-sm border-t border-line; }
+}
+
+.ecg-grid {
+  background-color: #FFF6F7;
+  background-image:
+    linear-gradient(#EFB8C1 1px, transparent 1px),
+    linear-gradient(90deg, #EFB8C1 1px, transparent 1px),
+    linear-gradient(#F8DDE1 1px, transparent 1px),
+    linear-gradient(90deg, #F8DDE1 1px, transparent 1px);
+  background-size: 40px 40px, 40px 40px, 8px 8px, 8px 8px;
+}
+
+@keyframes trace { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }
+.trace-draw { stroke-dasharray: var(--len); animation: trace 1.4s cubic-bezier(.4,0,.2,1) forwards; }
+@media (prefers-reduced-motion: reduce) { .trace-draw { animation: none; stroke-dasharray: none; } }

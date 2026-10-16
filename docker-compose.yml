@@ -1,0 +1,29 @@
+# Production-like stack: app + PostgreSQL.  Run:  docker compose up --build
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: cardio
+      POSTGRES_PASSWORD: cardio
+      POSTGRES_DB: cardiosense
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cardio -d cardiosense"]
+      interval: 5s
+      retries: 10
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://cardio:cardio@db:5432/cardiosense
+      SECRET_KEY: ${SECRET_KEY:-change-me-to-a-long-random-string-before-going-live}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@cardiosense.app}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe!2026}
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  pgdata:

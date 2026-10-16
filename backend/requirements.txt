@@ -1,0 +1,17 @@
+# Runtime. scikit-learn and numpy are pinned to the versions the model artifacts were trained with.
+fastapi==0.143.2
+uvicorn[standard]==0.53.0
+sqlalchemy==2.1.4
+psycopg[binary]==3.3.6
+pyjwt==2.14.0
+bcrypt==5.0.0
+email-validator>=2.2
+python-multipart>=0.0.20
+pydantic==2.13.5
+scikit-learn==1.9.1
+numpy==2.5.3
+scipy==1.18.1
+pandas==3.0.5
+joblib==1.6.0
+shap==0.54.1
+reportlab==5.0.1
